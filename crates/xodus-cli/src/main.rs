@@ -13,7 +13,7 @@ mod webview;
 
 #[derive(Subcommand)]
 enum SubCommand {
-    #[command(about = "Download msixvc or xsp files fo given game")]
+    #[command(about = "Download msixvc or xsp files for given game")]
     Download {
         product: String,
         #[arg(short, long)]

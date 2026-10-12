@@ -48,10 +48,12 @@ The project structure is as follows.
 
 ```
 .
-├── msixvc - [rlib] common rlib crate for utilities for parsing MSIXVC and XSP files
-├── xodus - [rlib] common rlib crate that contains core xodus functionality, API calls abstractions and utilities
-├── xodus-cli - [bin] CLI currently used for iterating over new xodus features
-└── xodus-service - [bin] service process exposing a xodus.sock for IPC communication, it takes care of xgameruntime.dll integration.
+└── crates
+    ├── msixvc - [rlib] common rlib crate for utilities for parsing MSIXVC and XSP files
+    ├── msixvc-common - [rlib] common rlib crate with generic fixed-length binary structure parsing and Package Resource Index (PRI) support
+    ├── xodus - [rlib] common rlib crate that contains core xodus functionality, API calls abstractions and utilities
+    ├── xodus-cli - [bin] CLI currently used for iterating over new xodus features
+    └── xodus-service - [bin] service process exposing a xodus.sock for IPC communication, it takes care of xgameruntime.dll integration.
 ```
 
 > [!NOTE]
@@ -61,7 +63,7 @@ The project structure is as follows.
 
 - Rust version 1.98 or later
 - Right now CLI relies on wry and tao to show a login page. Consult https://docs.rs/wry/latest/wry/#platform-considerations
-- xodus-service relies on `protoc` to compile `proto/` definitions make sure to install it for your platform
+- The `xodus` crate compiles its `proto/` definitions at build time via prost, so `protoc` must be installed for your platform
 
 ### Running
 
@@ -103,14 +105,17 @@ RUSTFLAGS="--cfg tokio_unstable" cargo run --features tokio_console
 Usage: xodus-cli <COMMAND>
 
 Commands:
-  download    Download msixvc or xsp files for a given game
-  license     Dump CIKs for use with XvdTool
-  extract     Extract locally stored msixvc file
-  login       
-  streaming   Download and extract the game through streaming algorithm
-  clep        Generate or decrypt base64-encoded CLEP challenge data
-  sp-license  Decode SPLicenseBlock
-  help        Print this message or the help of the given subcommand(s)
+  download       Download msixvc or xsp files for given game
+  license        Dump CIKs for use with XvdTool
+  extract        Extract locally stored msixvc file
+  extract-eappx  Extract a locally stored EAppx/EMSIX package (research task, see issue #91)
+  login          
+  logout         
+  streaming      Download and extract the game through streaming algorithm
+  run            Run a Game with xodus wine
+  clep           Generate or decrypt base64-encoded CLEP challenge data
+  sp-license     Decode SPLicenseBlock
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
