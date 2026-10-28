@@ -176,6 +176,11 @@ enum StoreAction {
             help = "Path to a dependency container (.appx/.msix); repeat for each"
         )]
         dependencies: Vec<String>,
+        #[arg(
+            long = "dependencies-dir",
+            help = "Directory containing downloaded dependency packages (.appx/.msix)"
+        )]
+        dependencies_dir: Option<String>,
     },
     #[cfg(unix)]
     #[command(
@@ -366,7 +371,8 @@ async fn main() -> ExitCode {
                 package,
                 destination,
                 dependencies,
-            } => commands::store::run_install(package, destination, dependencies),
+                dependencies_dir,
+            } => commands::store::run_install(package, destination, dependencies, dependencies_dir),
             #[cfg(unix)]
             StoreAction::Run {
                 directory,

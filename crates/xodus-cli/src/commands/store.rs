@@ -20,6 +20,8 @@ use msix::manifest::{
 use msix::opc;
 use msix::opc::Container;
 
+const MRT100_STUB_DLL: &[u8] = include_bytes!("../../resources/mrt100.dll");
+
 /// Lists the package files of one Store product category plus their resolved
 /// delivery URLs (FE3 protocol, no authentication).
 ///
@@ -296,7 +298,47 @@ pub fn run_extract(package: String, destination: Option<String>, arch: Option<St
 /// The report afterwards comes from the main `AppxManifest.xml`: identity,
 /// applications (entry point), package dependencies and target device
 /// families — what Windows would register on installation.
-pub fn run_install(package: String, destination: String, dependencies: Vec<String>) -> ExitCode {
+pub fn run_install(
+    package: String,
+    destination: String,
+    mut dependencies: Vec<String>,
+    dependencies_dir: Option<String>,
+) -> ExitCode {
+    if let Some(dir) = &dependencies_dir {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "appx" || ext == "msix") && path.to_string_lossy() != package {
+                        dependencies.push(path.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    if dependencies.is_empty() {
+        if let Some(parent) = Path::new(&package).parent() {
+            let parent_dir = if parent.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                parent
+            };
+            if let Ok(entries) = std::fs::read_dir(parent_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(ext) = path.extension() {
+                        if (ext == "appx" || ext == "msix") && path.to_string_lossy() != package {
+                            dependencies.push(path.to_string_lossy().into_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !dependencies.is_empty() {
+        println!("Resolved {} dependency package(s)", dependencies.len());
+    }
+
     let mut container = match open_container(&package) {
         Ok(container) => container,
         Err(e) => {
@@ -308,18 +350,68 @@ pub fn run_install(package: String, destination: String, dependencies: Vec<Strin
         eprintln!("Could not create destination directory '{destination}': {e}");
         return ExitCode::FAILURE;
     }
-    let main_extraction = match container.extract_all(Path::new(&destination)) {
-        Ok(extraction) => extraction,
-        Err(e) => {
-            eprintln!("Extraction of {package} failed: {e}");
+
+    if container.has_bundle_manifest() {
+        let arch = host_arch();
+        let manifest = match container.read_bundle_manifest() {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                eprintln!("Could not read bundle manifest of {package}: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let selected = select_arch_application_packages(&manifest, arch);
+        if selected.is_empty() {
+            eprintln!("Bundle {package} carries no application package for {arch}");
             return ExitCode::FAILURE;
         }
-    };
-    println!(
-        "Main package {package}: {files} files ({bytes} bytes) extracted to {destination}",
-        files = main_extraction.files,
-        bytes = main_extraction.bytes
-    );
+        for entry in &selected {
+            println!("Extracting bundled application package: {}", entry.file_name);
+            let mut temp_file = match tempfile::tempfile() {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Could not create temp file for bundled package: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = container.copy_entry(&entry.file_name, &mut temp_file) {
+                eprintln!("Could not extract bundled package {}: {e}", entry.file_name);
+                return ExitCode::FAILURE;
+            }
+            let mut app_container = match Container::open(temp_file) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Could not open bundled package {}: {e}", entry.file_name);
+                    return ExitCode::FAILURE;
+                }
+            };
+            match app_container.extract_all(Path::new(&destination)) {
+                Ok(ext) => println!(
+                    "Extracted {files} files ({bytes} bytes) from {name}",
+                    files = ext.files,
+                    bytes = ext.bytes,
+                    name = entry.file_name
+                ),
+                Err(e) => {
+                    eprintln!("Extraction of {name} failed: {e}", name = entry.file_name);
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    } else {
+        let main_extraction = match container.extract_all(Path::new(&destination)) {
+            Ok(extraction) => extraction,
+            Err(e) => {
+                eprintln!("Extraction of {package} failed: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        println!(
+            "Main package {package}: {files} files ({bytes} bytes) extracted to {destination}",
+            files = main_extraction.files,
+            bytes = main_extraction.bytes
+        );
+    }
 
     for dependency in &dependencies {
         let mut dep_container = match open_container(dependency) {
@@ -348,7 +440,138 @@ pub fn run_install(package: String, destination: String, dependencies: Vec<Strin
         }
     }
 
-    report_install_manifest(&destination)
+    let report_code = report_install_manifest(&destination);
+    if report_code != ExitCode::SUCCESS {
+        return report_code;
+    }
+
+    if let Err(e) = setup_app_environment(Path::new(&destination)) {
+        eprintln!("Warning: could not complete launcher setup: {e}");
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn setup_app_environment(destination: &Path) -> Result<(), String> {
+    let manifest_path = destination.join(opc::MANIFEST_PATH);
+    let manifest_xml = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("Could not read manifest {}: {e}", manifest_path.display()))?;
+    let manifest = parse_package_manifest(&manifest_xml)
+        .map_err(|e| format!("Could not parse manifest: {e}"))?;
+
+    // 1. Install .NET Native runtime stub if required
+    let needs_mrt = destination.join("mrt100_app.dll").exists()
+        || manifest
+            .package_dependencies
+            .iter()
+            .any(|d| d.name.contains("Microsoft.NET.Native"));
+
+    if needs_mrt && !destination.join("mrt100.dll").exists() {
+        let mrt_path = destination.join("mrt100.dll");
+        std::fs::write(&mrt_path, MRT100_STUB_DLL)
+            .map_err(|e| format!("Could not write {}: {e}", mrt_path.display()))?;
+        println!("  Installed .NET Native runtime bridge: mrt100.dll");
+    }
+
+    // 2. Pre-seed WinRT class registry
+    let (classes, _) = collect_activatable_classes(destination)?;
+    if !classes.is_empty() {
+        let reg_content = winrt_registry_file(&classes, destination);
+        let reg_path = destination.join("AppxMetadata").join("xodus-winrt.reg");
+        if let Some(parent) = reg_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        write_utf16_file(&reg_path, &reg_content).map_err(|e| format!("{e}"))?;
+        println!(
+            "  Seeded {} activatable classes into {}",
+            classes.len(),
+            reg_path.display()
+        );
+    }
+
+    // 3. Pre-seed AppModel packages registry
+    let (packages, _) = collect_app_model_packages(destination, &manifest)?;
+    let appmodel_reg_path = destination.join("AppxMetadata").join("xodus-appmodel.reg");
+    if let Some(parent) = appmodel_reg_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    write_utf16_file(
+        &appmodel_reg_path,
+        &appmodel_registry_file(&packages, destination),
+    )
+    .map_err(|e| format!("{e}"))?;
+    println!(
+        "  Seeded {} AppModel packages into {}",
+        packages.len(),
+        appmodel_reg_path.display()
+    );
+
+    // 4. Generate executable launch.sh
+    let entry = choose_entry_executable(&manifest, None)?;
+    let entry_path = entry.replace('\\', "/");
+    let launcher_content = generate_launcher_script(&entry_path);
+    let launcher_path = destination.join("launch.sh");
+    std::fs::write(&launcher_path, launcher_content)
+        .map_err(|e| format!("Could not write {}: {e}", launcher_path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&launcher_path, std::fs::Permissions::from_mode(0o755));
+    }
+
+    println!("  Generated executable launcher: {}", launcher_path.display());
+    println!(
+        "\nApplication ready! To launch directly:\n  {}",
+        launcher_path.display()
+    );
+
+    Ok(())
+}
+
+fn generate_launcher_script(entry_exe: &str) -> String {
+    format!(
+        r#"#!/bin/bash
+set -e
+
+# Directory where this script and the application reside
+APP_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+
+# Allow user to specify WINE and WINEPREFIX, or default to reasonable paths
+WINE="${{WINE:-wine}}"
+WINEPREFIX="${{WINEPREFIX:-$APP_DIR/.xodus-wine}}"
+export WINEPREFIX
+
+# Ensure display is available
+if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+    export DISPLAY=:0
+fi
+
+# Initialize Wine prefix if needed
+if [ ! -f "$WINEPREFIX/system.reg" ]; then
+    echo "Initializing Wine prefix in $WINEPREFIX..."
+    "$WINE" wineboot --init
+    "$WINE" reg add "HKCU\\Software\\Wine\\WineDbg" /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1 || true
+fi
+
+# Seed WinRT Activatable Classes
+if [ -f "$APP_DIR/AppxMetadata/xodus-winrt.reg" ]; then
+    "$WINE" regedit /S "Z:${{APP_DIR//\//\\}}\\AppxMetadata\\xodus-winrt.reg" >/dev/null 2>&1 || \
+    "$WINE" regedit /S "$APP_DIR/AppxMetadata/xodus-winrt.reg" >/dev/null 2>&1 || true
+fi
+
+# Seed AppModel Packages table
+if [ -f "$APP_DIR/AppxMetadata/xodus-appmodel.reg" ]; then
+    "$WINE" regedit /S "Z:${{APP_DIR//\//\\}}\\AppxMetadata\\xodus-appmodel.reg" >/dev/null 2>&1 || \
+    "$WINE" regedit /S "$APP_DIR/AppxMetadata/xodus-appmodel.reg" >/dev/null 2>&1 || true
+fi
+
+# Launch application
+echo "Starting {entry_exe} with $WINE..."
+cd "$APP_DIR"
+exec "$WINE" "$APP_DIR/{entry_exe}" "$@"
+"#
+    )
 }
 
 fn extract_bundle(
