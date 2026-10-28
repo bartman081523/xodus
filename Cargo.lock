@@ -3098,7 +3098,7 @@ dependencies = [
  "rand 0.8.8",
  "ripemd",
  "rsa",
- "sha1",
+ "sha1 0.10.7",
  "sha2 0.10.9",
  "sha3 0.10.9",
  "signature 2.2.0",
@@ -3342,6 +3342,16 @@ dependencies = [
  "hybrid-array",
  "num-traits",
  "zeroize",
+]
+
+[[package]]
+name = "msix"
+version = "0.1.0"
+dependencies = [
+ "quick-xml 0.42.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zip",
 ]
 
 [[package]]
@@ -4151,7 +4161,7 @@ dependencies = [
  "des 0.8.1",
  "pbkdf2",
  "scrypt",
- "sha1",
+ "sha1 0.10.7",
  "sha2 0.10.9",
  "spki 0.7.3",
 ]
@@ -5148,6 +5158,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6132,6 +6153,12 @@ dependencies = [
  "thiserror 2.0.20",
  "x509-cert",
 ]
+
+[[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
 name = "typeid"
@@ -7185,11 +7212,14 @@ dependencies = [
  "futures-util",
  "indicatif",
  "inquire",
+ "msix",
  "msixvc",
  "nix",
  "reqwest 0.13.4",
  "rustix",
  "serde_json",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
  "tao",
  "tempfile",
  "tokio",
@@ -7348,6 +7378,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+]
+
+[[package]]
+name = "zip"
+version = "9.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e2fc56a6707efb066c40aead2409ebb1224e6dde24a074e9fbc78ced500507b"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "nix",
+ "typed-path",
 ]
 
 [[package]]

@@ -8,4 +8,5 @@ pub mod logout;
 #[cfg(unix)]
 pub mod run;
 pub mod splicense;
+pub mod store;
 pub mod streaming;

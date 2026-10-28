@@ -1,11 +1,13 @@
 pub mod clep;
 pub mod devicecredential;
 pub mod displaycatalog;
+pub mod fe3;
 pub mod licensing;
 pub mod live;
 pub mod packagespc;
 pub mod secrets;
 pub mod soap;
+pub mod store;
 pub mod xbox;
 pub mod xgameruntime;
 pub mod xodus;

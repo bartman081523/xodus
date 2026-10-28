@@ -1,0 +1,13 @@
+[package]
+name = "msix"
+version = "0.1.0"
+edition = "2024"
+rust-version = { workspace = true }
+
+[dependencies]
+zip = { version = "9.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+quick-xml = "0.42.0"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"
