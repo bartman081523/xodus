@@ -137,6 +137,7 @@ mod test {
     use crate::tokens::TokenManager;
     use crate::tokens::device::ensure_device_credentials;
 
+    #[ignore]
     #[tokio::test]
     async fn test_get_xbox_live_dev_token() {
         let client = reqwest::Client::new();
