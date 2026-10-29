@@ -366,7 +366,10 @@ pub fn run_install(
             return ExitCode::FAILURE;
         }
         for entry in &selected {
-            println!("Extracting bundled application package: {}", entry.file_name);
+            println!(
+                "Extracting bundled application package: {}",
+                entry.file_name
+            );
             let mut temp_file = match tempfile::tempfile() {
                 Ok(file) => file,
                 Err(e) => {
@@ -520,7 +523,10 @@ fn setup_app_environment(destination: &Path) -> Result<(), String> {
         let _ = std::fs::set_permissions(&launcher_path, std::fs::Permissions::from_mode(0o755));
     }
 
-    println!("  Generated executable launcher: {}", launcher_path.display());
+    println!(
+        "  Generated executable launcher: {}",
+        launcher_path.display()
+    );
     println!(
         "\nApplication ready! To launch directly:\n  {}",
         launcher_path.display()
@@ -1079,6 +1085,7 @@ impl AppModelPackage {
     }
 
     /// `Name_PublisherId` — the family a package and its updates share.
+    #[allow(dead_code)]
     fn family_name(&self) -> String {
         format!("{}_{}", self.name, self.publisher_id)
     }
@@ -1095,6 +1102,7 @@ impl AppModelPackage {
 
     /// `FamilyName!ApplicationId`, only for packages that declare a
     /// user-facing application.
+    #[allow(dead_code)]
     fn aumid(&self) -> Option<String> {
         self.app_id
             .as_ref()

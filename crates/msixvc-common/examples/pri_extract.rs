@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 use msixvc_common::resources::pri::Pri;
@@ -47,7 +47,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 extracted_count += 1;
                 println!("Extracted: {} ({} bytes)", out_path.display(), bytes.len());
 
-                if args.create_xaml_aliases && out_path.extension().and_then(|s| s.to_str()) == Some("xbf") {
+                if args.create_xaml_aliases
+                    && out_path.extension().and_then(|s| s.to_str()) == Some("xbf")
+                {
                     let xaml_path = out_path.with_extension("xaml");
                     fs::write(&xaml_path, &bytes)?;
                     println!("  -> Alias: {}", xaml_path.display());
@@ -56,6 +58,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    println!("\nTotal extracted from {}: {} file(s)", args.file.display(), extracted_count);
+    println!(
+        "\nTotal extracted from {}: {} file(s)",
+        args.file.display(),
+        extracted_count
+    );
     Ok(())
 }

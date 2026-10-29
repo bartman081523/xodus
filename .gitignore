@@ -2,3 +2,6 @@
 .env
 samples
 /proton-ge-custom
+/calculator-upstream
+/winsdk-10
+/xbf-analyzer

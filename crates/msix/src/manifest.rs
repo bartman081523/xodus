@@ -608,4 +608,83 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("Offset"), "got: {error}");
     }
+
+    #[test]
+    fn windows_calculator_manifest_parses_cleanly() {
+        let xml = r##"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+  <Identity Name="Microsoft.WindowsCalculator"
+            Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+            Version="11.2607.0.0"
+            ProcessorArchitecture="x64"/>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0"/>
+    <PackageDependency Name="Microsoft.UI.Xaml.2.8" MinVersion="8.2501.31001.0" Publisher="CN=Microsoft Corporation"/>
+    <PackageDependency Name="Microsoft.NET.Native.Runtime.2.2" MinVersion="2.2.28604.0" Publisher="CN=Microsoft Corporation"/>
+  </Dependencies>
+  <Applications>
+    <Application Id="App" Executable="CalculatorApp.exe" EntryPoint="Calculator.App">
+      <uap:VisualElements DisplayName="Calculator" Description="Windows Calculator" BackgroundColor="#0078D4"/>
+    </Application>
+  </Applications>
+</Package>"##;
+        let manifest = parse_package_manifest(xml).expect("Calculator manifest must parse cleanly");
+        assert_eq!(manifest.identity.name, "Microsoft.WindowsCalculator");
+        assert_eq!(
+            manifest.identity.processor_architecture.as_deref(),
+            Some("x64")
+        );
+        assert_eq!(manifest.applications.len(), 1);
+        assert_eq!(manifest.applications[0].id, "App");
+        assert_eq!(manifest.applications[0].executable, "CalculatorApp.exe");
+        assert_eq!(
+            manifest.applications[0].entry_point.as_deref(),
+            Some("Calculator.App")
+        );
+        assert!(
+            manifest
+                .package_dependencies
+                .iter()
+                .any(|d| d.name == "Microsoft.UI.Xaml.2.8")
+        );
+        assert!(
+            manifest
+                .package_dependencies
+                .iter()
+                .any(|d| d.name == "Microsoft.NET.Native.Runtime.2.2")
+        );
+    }
+
+    #[test]
+    fn windows_calculator_activatable_classes_parsed() {
+        let xml = r#"<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+  <Extensions>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer>
+        <Path>CalculatorApp.dll</Path>
+        <ActivatableClass ActivatableClassId="CalculatorApp.ViewModel.Common.Utilities" ThreadingModel="both"/>
+        <ActivatableClass ActivatableClassId="CalculatorApp.ViewModel.Common.NavCategory" ThreadingModel="both"/>
+        <ActivatableClass ActivatableClassId="CalculatorApp.ViewModel.Common.DateCalculation.DateCalculationEngine" ThreadingModel="both"/>
+      </InProcessServer>
+    </Extension>
+  </Extensions>
+</Package>"#;
+        let classes =
+            parse_activatable_classes(xml).expect("Calculator activatable classes must parse");
+        assert_eq!(classes.len(), 3);
+        assert_eq!(
+            classes[0].class_id,
+            "CalculatorApp.ViewModel.Common.Utilities"
+        );
+        assert_eq!(classes[0].server_path, "CalculatorApp.dll");
+        assert_eq!(
+            classes[1].class_id,
+            "CalculatorApp.ViewModel.Common.NavCategory"
+        );
+        assert_eq!(
+            classes[2].class_id,
+            "CalculatorApp.ViewModel.Common.DateCalculation.DateCalculationEngine"
+        );
+    }
 }
