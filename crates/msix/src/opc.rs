@@ -81,7 +81,15 @@ impl<R: Read + Seek> Container<R> {
     }
 
     pub fn read_entry(&mut self, name: &str) -> Result<Vec<u8>, MsixError> {
-        let mut file = self.archive.by_name(name)?;
+        let normalized = name.replace('\\', "/");
+        let idx = self
+            .archive
+            .index_for_name(&normalized)
+            .or_else(|| self.archive.index_for_name(name));
+        let mut file = match idx {
+            Some(i) => self.archive.by_index(i)?,
+            None => self.archive.by_name(name)?,
+        };
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
         Ok(buffer)
@@ -93,8 +101,16 @@ impl<R: Read + Seek> Container<R> {
         name: &str,
         writer: &mut impl io::Write,
     ) -> Result<u64, MsixError> {
-        validate_entry_path(name)?;
-        let mut file = self.archive.by_name(name)?;
+        let normalized = name.replace('\\', "/");
+        validate_entry_path(&normalized)?;
+        let idx = self
+            .archive
+            .index_for_name(&normalized)
+            .or_else(|| self.archive.index_for_name(name));
+        let mut file = match idx {
+            Some(i) => self.archive.by_index(i)?,
+            None => self.archive.by_name(name)?,
+        };
         Ok(io::copy(&mut file, writer)?)
     }
 
@@ -105,7 +121,8 @@ impl<R: Read + Seek> Container<R> {
         let mut extraction = Extraction { files: 0, bytes: 0 };
         for index in 0..self.archive.len() {
             let mut file = self.archive.by_index(index)?;
-            let name = file.name()?.to_string();
+            let raw_name = file.name()?.to_string();
+            let name = raw_name.replace('\\', "/");
             validate_entry_path(&name)?;
             if file.is_dir() {
                 std::fs::create_dir_all(destination.join(&name))?;
@@ -135,7 +152,8 @@ impl<R: Read + Seek> Container<R> {
         let mut extraction = Extraction { files: 0, bytes: 0 };
         for index in 0..self.archive.len() {
             let mut file = self.archive.by_index(index)?;
-            let name = file.name()?.to_string();
+            let raw_name = file.name()?.to_string();
+            let name = raw_name.replace('\\', "/");
             validate_entry_path(&name)?;
             if file.is_dir() {
                 let target = destination.join(&name);

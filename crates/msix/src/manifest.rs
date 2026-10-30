@@ -38,6 +38,8 @@ pub struct BundlePackage {
     pub offset: u64,
     /// Uncompressed length of the inner package in the bundle archive.
     pub size: u64,
+    /// Whether this package is a lightweight stub (`IsStub="true"`).
+    pub is_stub: bool,
 }
 
 /// Parsed `AppxMetadata/AppxBundleManifest.xml`.
@@ -97,7 +99,7 @@ pub fn select_arch_application_packages(
     manifest: &BundleManifest,
     arch: &str,
 ) -> Vec<BundlePackage> {
-    manifest
+    let candidates: Vec<BundlePackage> = manifest
         .packages
         .iter()
         .filter(|package| {
@@ -108,7 +110,15 @@ pub fn select_arch_application_packages(
                     .is_some_and(|candidate| candidate.eq_ignore_ascii_case(arch))
         })
         .cloned()
-        .collect()
+        .collect();
+
+    let non_stubs: Vec<BundlePackage> =
+        candidates.iter().filter(|p| !p.is_stub).cloned().collect();
+    if !non_stubs.is_empty() {
+        non_stubs
+    } else {
+        candidates
+    }
 }
 
 /// Parses `AppxMetadata/AppxBundleManifest.xml`.
@@ -334,6 +344,9 @@ fn parse_identity(element: &BytesStart) -> Result<ManifestIdentity, MsixError> {
 }
 
 fn parse_bundle_package(element: &BytesStart) -> Result<BundlePackage, MsixError> {
+    let is_stub = attribute(element, "IsStub")?
+        .map(|val| val.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     Ok(BundlePackage {
         package_type: required_attribute(element, "Package", "Type")?,
         version: required_attribute(element, "Package", "Version")?,
@@ -341,6 +354,7 @@ fn parse_bundle_package(element: &BytesStart) -> Result<BundlePackage, MsixError
         file_name: required_attribute(element, "Package", "FileName")?,
         offset: number_attribute(element, "Package", "Offset")?.unwrap_or(0),
         size: number_attribute(element, "Package", "Size")?.unwrap_or(0),
+        is_stub,
     })
 }
 
@@ -456,6 +470,26 @@ mod tests {
         );
         assert!(select_arch_application_packages(&manifest, "x86").is_empty());
         assert!(select_arch_application_packages(&manifest, "neutral").is_empty());
+    }
+
+    #[test]
+    fn arch_selection_prefers_non_stub_over_stub_package() {
+        let bundle_xml = br#"<Bundle xmlns="http://schemas.microsoft.com/appx/2013/bundle" xmlns:b5="http://schemas.microsoft.com/appx/2019/bundle">
+            <Identity Name="Test" Publisher="CN=Test" Version="1.0.0.0"/>
+            <Packages>
+                <b5:Package Type="application" Version="1.0.0.0" Architecture="x64" FileName="Stub\App_x64.msix" Offset="0" Size="100" IsStub="true"/>
+                <Package Type="application" Version="1.0.1.0" Architecture="x64" FileName="App_x64.msix" Offset="100" Size="50000"/>
+            </Packages>
+        </Bundle>"#;
+        let manifest = parse_bundle_manifest(std::str::from_utf8(bundle_xml).unwrap()).unwrap();
+        assert_eq!(manifest.packages.len(), 2);
+        assert!(manifest.packages[0].is_stub);
+        assert!(!manifest.packages[1].is_stub);
+
+        let selected = select_arch_application_packages(&manifest, "x64");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].file_name, "App_x64.msix");
+        assert!(!selected[0].is_stub);
     }
 
     #[test]
