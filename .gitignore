@@ -6,3 +6,4 @@ samples
 /winsdk-10
 /xbf-analyzer
 tmp_work/
+tests/*.exe
