@@ -1211,8 +1211,16 @@ fn appmodel_registry_file(packages: &[AppModelPackage], package_dir: &Path) -> S
 /// The Windows form of an absolute POSIX path through wine's default
 /// Z: drive, which maps to the filesystem root
 /// (`/run/media/julian/App` → `Z:\run\media\julian\App`).
+/// Relative paths are joined against the current working directory first.
 fn windows_z_path(path: &Path) -> String {
-    let body = path
+    let abs_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let body = abs_path
         .to_string_lossy()
         .replace('/', "\\")
         .trim_start_matches('\\')
@@ -1334,6 +1342,15 @@ mod tests {
         // Path segments from the manifest (forward or Windows spelling)
         // land backslashed, regedit-escaped as doubled backslashes.
         assert!(file.contains("\"DllPath\"=\"Z:\\\\run\\\\xodus\\\\sub\\\\dir\\\\Deep.dll\"\n\n"));
+    }
+
+    #[test]
+    fn windows_z_path_resolves_relative_paths() {
+        let rel = Path::new("sub/path/app");
+        let z = windows_z_path(rel);
+        let cwd = std::env::current_dir().unwrap();
+        let expected_body = cwd.join(rel).to_string_lossy().replace('/', "\\").trim_start_matches('\\').to_owned();
+        assert_eq!(z, format!("Z:\\{expected_body}"));
     }
 
     #[test]
