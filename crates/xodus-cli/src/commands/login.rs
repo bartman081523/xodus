@@ -11,7 +11,23 @@ const LOGIN_MARKET: &str = "en-US";
 const USER_AUTH_SCOPE: &str = "scope=service::user.auth.xboxlive.com::MBI_SSL&api-version=2.0";
 
 pub async fn run(client: &reqwest::Client, tokens: &TokenManager) -> ExitCode {
-    let token = tokens.get_device_sts_token().unwrap();
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            // SAFETY: this is called during CLI startup before background threads are spawned.
+            unsafe {
+                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+        }
+    }
+
+    let token = match tokens.get_device_sts_token() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Failed to get device STS token: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let secrets::Token::Legacy(token) = token else {
         eprintln!("Invalid STS token");
         return ExitCode::FAILURE;
@@ -32,7 +48,7 @@ pub async fn run(client: &reqwest::Client, tokens: &TokenManager) -> ExitCode {
         _ => unreachable!(),
     };
 
-    for token in issued_tokens {
+    let to_save = issued_tokens.into_iter().map(|token| {
         let address = token.applies_to.endpoint_reference.address.clone();
         let token = token.into();
         let address = if let secrets::Token::Legacy(legacy) = &token {
@@ -40,8 +56,9 @@ pub async fn run(client: &reqwest::Client, tokens: &TokenManager) -> ExitCode {
         } else {
             address
         };
-        tokens.save_user_token(address, token).unwrap();
-    }
+        (address, token)
+    });
+    tokens.save_user_tokens(to_save).unwrap();
 
     ExitCode::SUCCESS
 }

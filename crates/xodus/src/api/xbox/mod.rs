@@ -46,7 +46,7 @@ pub async fn run(
         _ => unreachable!("Only responses are handled"),
     };
     let Token::Compact(user_token) = user_token else {
-        eprintln!("Unsupported token");
+        eprintln!("Unsupported token: {user_token:?}");
         panic!("TODO");
     };
     let resp = authenticate_xbox_user(client, user_token)

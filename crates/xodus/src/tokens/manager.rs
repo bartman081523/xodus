@@ -68,6 +68,9 @@ impl TokenManager {
             .persistent
             .get(keys::DEV_LICENSE)?
             .ok_or(TokenStoreError::NotFound)?;
+        if bytes.is_empty() {
+            return Err(TokenStoreError::NotFound);
+        }
         Ok(serde_json::from_slice(&bytes)?)
     }
 
@@ -90,6 +93,13 @@ impl TokenManager {
         Self::write_token_store(&*self.persistent, keys::DEVICE_TOKENS, address, token)
     }
 
+    pub fn save_device_tokens(
+        &self,
+        tokens: impl IntoIterator<Item = (String, Token)>,
+    ) -> Result<(), TokenStoreError> {
+        Self::write_tokens_store(&*self.persistent, keys::DEVICE_TOKENS, tokens)
+    }
+
     pub fn get_device_sts_token(&self) -> Result<Token, TokenStoreError> {
         self.get_device_token_for(PASSPORT_STS)?
             .ok_or(TokenStoreError::NotFound)
@@ -105,6 +115,13 @@ impl TokenManager {
         Self::write_token_store(&*self.persistent, keys::USER_TOKENS, address, token)
     }
 
+    pub fn save_user_tokens(
+        &self,
+        tokens: impl IntoIterator<Item = (String, Token)>,
+    ) -> Result<(), TokenStoreError> {
+        Self::write_tokens_store(&*self.persistent, keys::USER_TOKENS, tokens)
+    }
+
     pub fn get_user_sts_token(&self) -> Result<Token, TokenStoreError> {
         self.get_user_token_for(PASSPORT_STS)?
             .ok_or(TokenStoreError::NotFound)
@@ -117,6 +134,9 @@ impl TokenManager {
             .persistent
             .get(keys::USER_INFO)?
             .ok_or(TokenStoreError::NotFound)?;
+        if bytes.is_empty() {
+            return Err(TokenStoreError::NotFound);
+        }
         Ok(serde_json::from_slice(&bytes)?)
     }
 
@@ -158,6 +178,9 @@ impl TokenManager {
         let Some(bytes) = backend.get(key)? else {
             return Ok(None);
         };
+        if bytes.is_empty() {
+            return Ok(None);
+        }
         let store: TokenStore = serde_json::from_slice(&bytes)?;
         Ok(store.tokens.get(address).cloned())
     }
@@ -170,11 +193,32 @@ impl TokenManager {
     ) -> Result<(), TokenStoreError> {
         let mut tokens: HashMap<String, Token> = match backend.get(key)? {
             Some(bytes) if !bytes.is_empty() => {
-                serde_json::from_slice::<TokenStore>(&bytes)?.tokens
+                serde_json::from_slice::<TokenStore>(&bytes)
+                    .map(|s| s.tokens)
+                    .unwrap_or_default()
             }
             _ => HashMap::new(),
         };
         tokens.insert(address, token);
+        backend.set(key, &serde_json::to_vec(&TokenStore { tokens })?)
+    }
+
+    fn write_tokens_store(
+        backend: &dyn TokenBackend,
+        key: &str,
+        new_tokens: impl IntoIterator<Item = (String, Token)>,
+    ) -> Result<(), TokenStoreError> {
+        let mut tokens: HashMap<String, Token> = match backend.get(key)? {
+            Some(bytes) if !bytes.is_empty() => {
+                serde_json::from_slice::<TokenStore>(&bytes)
+                    .map(|s| s.tokens)
+                    .unwrap_or_default()
+            }
+            _ => HashMap::new(),
+        };
+        for (address, token) in new_tokens {
+            tokens.insert(address, token);
+        }
         backend.set(key, &serde_json::to_vec(&TokenStore { tokens })?)
     }
 }

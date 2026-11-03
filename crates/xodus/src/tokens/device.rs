@@ -12,7 +12,7 @@ pub async fn ensure_device_credentials(client: &reqwest::Client, tokens: &TokenM
     match tokens.get_device_license() {
         Err(_) => provision_device(client, tokens).await,
         Ok(license) if tokens.get_device_sts_token().is_err() => {
-            reauthenticate_device(client, tokens, license).await
+            reauthenticate_device(client, tokens, license).await;
         }
         Ok(_) => {}
     }
@@ -61,8 +61,30 @@ async fn reauthenticate_device(client: &reqwest::Client, tokens: &TokenManager, 
         .await
         .expect("Failed to auth device");
 
-    if let BodyContent::RequestSecurityTokenResponse(resp) = resp.body.body {
-        save_device_sts_token(tokens, resp);
+    match resp.body.body {
+        BodyContent::RequestSecurityTokenResponse(resp) => {
+            save_device_sts_token(tokens, resp);
+        }
+        BodyContent::RequestSecurityTokenResponseCollection(coll) => {
+            let to_save = coll.security_tokens.into_iter().filter_map(|resp| {
+                let key_name = resp
+                    .requested_security_token
+                    .encrypted_data
+                    .as_ref()?
+                    .key_info
+                    .key_name
+                    .as_ref()?
+                    .clone();
+                let token = resp.into();
+                Some((key_name, token))
+            });
+            tokens
+                .save_device_tokens(to_save)
+                .expect("Failed to save device tokens");
+        }
+        other => {
+            eprintln!("Unexpected body content in reauthenticate_device: {other:?}");
+        }
     }
 }
 
