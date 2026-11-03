@@ -548,14 +548,28 @@ WINE="${{WINE:-wine}}"
 WINEPREFIX="${{WINEPREFIX:-$APP_DIR/.xodus-wine}}"
 export WINEPREFIX
 
+# Default to English (en-US) localization if not specified
+export LC_ALL="${{LC_ALL:-en_US.UTF-8}}"
+export LANG="${{LANG:-en_US.UTF-8}}"
+
 # Ensure display is available
 if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
     export DISPLAY=:0
 fi
 
+# Discover Proton runtime components if using Proton / GE-Proton
+WINE_BIN_DIR="$(cd "$(dirname "$WINE")" 2>/dev/null && pwd)"
+WINESERVER="$WINE_BIN_DIR/wineserver"
+DEFAULT_PFX="$(cd "$WINE_BIN_DIR/../share/default_pfx" 2>/dev/null && pwd)"
+
 # Initialize Wine prefix if needed
 if [ ! -f "$WINEPREFIX/system.reg" ]; then
     echo "Initializing Wine prefix in $WINEPREFIX..."
+    if [ -n "$DEFAULT_PFX" ] && [ -d "$DEFAULT_PFX" ]; then
+        echo "Seeding Proton runtime template from $DEFAULT_PFX..."
+        mkdir -p "$WINEPREFIX"
+        cp -rn "$DEFAULT_PFX"/* "$WINEPREFIX/" 2>/dev/null || true
+    fi
     "$WINE" wineboot --init
     "$WINE" reg add "HKCU\\Software\\Wine\\WineDbg" /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1 || true
 fi
@@ -570,6 +584,13 @@ fi
 if [ -f "$APP_DIR/AppxMetadata/xodus-appmodel.reg" ]; then
     "$WINE" regedit /S "Z:${{APP_DIR//\//\\}}\\AppxMetadata\\xodus-appmodel.reg" >/dev/null 2>&1 || \
     "$WINE" regedit /S "$APP_DIR/AppxMetadata/xodus-appmodel.reg" >/dev/null 2>&1 || true
+fi
+
+# Ensure registry state is flushed to disk
+if [ -x "$WINESERVER" ]; then
+    "$WINESERVER" -w >/dev/null 2>&1 || true
+elif command -v wineserver >/dev/null 2>&1; then
+    wineserver -w >/dev/null 2>&1 || true
 fi
 
 # Launch application
@@ -842,6 +863,21 @@ pub async fn run_run(
         .unwrap_or_else(|| directory.join(".xodus-wine"));
     if !prefix.join("system.reg").exists() {
         println!("Initializing wine prefix {} with {wine}", prefix.display());
+        if let Some(wine_bin) = Path::new(&wine).parent() {
+            let default_pfx = wine_bin.join("../share/default_pfx");
+            if default_pfx.is_dir() {
+                println!(
+                    "Seeding Proton runtime template from {}",
+                    default_pfx.display()
+                );
+                let _ = std::fs::create_dir_all(&prefix);
+                let _ = std::process::Command::new("cp")
+                    .arg("-rn")
+                    .arg(format!("{}/.", default_pfx.display()))
+                    .arg(format!("{}/", prefix.display()))
+                    .status();
+            }
+        }
         match Command::new(&wine)
             .env("WINEPREFIX", &prefix)
             .arg("wineboot")
@@ -958,12 +994,26 @@ pub async fn run_run(
         }
     }
 
+    // Flush registry state to disk
+    if let Some(wine_bin) = Path::new(&wine).parent() {
+        let wineserver = wine_bin.join("wineserver");
+        if wineserver.is_file() {
+            let _ = Command::new(wineserver).arg("-w").status().await;
+        }
+    } else {
+        let _ = Command::new("wineserver").arg("-w").status().await;
+    }
+
     println!(
         "Launching {entry} with {wine} (prefix {})",
         prefix.display()
     );
+    let lc_all = std::env::var("LC_ALL").unwrap_or_else(|_| "en_US.UTF-8".to_string());
+    let lang = std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string());
     let child = Command::new(&wine)
         .env("WINEPREFIX", &prefix)
+        .env("LC_ALL", lc_all)
+        .env("LANG", lang)
         .current_dir(&directory)
         .arg(&entry_path)
         .spawn();
@@ -1509,5 +1559,17 @@ mod tests {
         );
         assert!(packages[1].is_framework);
         assert!(packages[1].app_id.is_none());
+    }
+
+    #[test]
+    fn launcher_script_includes_proton_seeding_and_locale() {
+        let script = generate_launcher_script("Game.exe");
+        assert!(script.contains("Starting Game.exe with $WINE..."));
+        assert!(script.contains("LC_ALL=\"${LC_ALL:-en_US.UTF-8}\""));
+        assert!(script.contains("LANG=\"${LANG:-en_US.UTF-8}\""));
+        assert!(script.contains("DEFAULT_PFX"));
+        assert!(script.contains("cp -rn \"$DEFAULT_PFX\"/* \"$WINEPREFIX/\""));
+        assert!(script.contains("\"$WINESERVER\" -w"));
+        assert!(script.contains("exec \"$WINE\" \"$APP_DIR/Game.exe\" \"$@\""));
     }
 }
