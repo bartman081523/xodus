@@ -561,14 +561,39 @@ fi
 WINE_BIN_DIR="$(cd "$(dirname "$WINE")" 2>/dev/null && pwd)"
 WINESERVER="$WINE_BIN_DIR/wineserver"
 DEFAULT_PFX="$(cd "$WINE_BIN_DIR/../share/default_pfx" 2>/dev/null && pwd)"
+export DEFAULT_PFX
 
 # Initialize Wine prefix if needed
 if [ ! -f "$WINEPREFIX/system.reg" ]; then
     echo "Initializing Wine prefix in $WINEPREFIX..."
+    mkdir -p "$WINEPREFIX/dosdevices"
+    ln -sfn "../drive_c" "$WINEPREFIX/dosdevices/c:"
+    ln -sfn "/" "$WINEPREFIX/dosdevices/z:"
+
     if [ -n "$DEFAULT_PFX" ] && [ -d "$DEFAULT_PFX" ]; then
         echo "Seeding Proton runtime template from $DEFAULT_PFX..."
-        mkdir -p "$WINEPREFIX"
-        cp -rn "$DEFAULT_PFX"/* "$WINEPREFIX/" 2>/dev/null || true
+        python3 -c '
+import os, sys, shutil
+src = os.environ.get("DEFAULT_PFX", "")
+dst = os.environ.get("WINEPREFIX", "")
+if src and os.path.isdir(src) and dst:
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        out_dir = os.path.normpath(os.path.join(dst, rel))
+        os.makedirs(out_dir, exist_ok=True)
+        for f in files:
+            sp = os.path.join(root, f)
+            dp = os.path.join(out_dir, f)
+            if not os.path.lexists(dp):
+                if os.path.islink(sp):
+                    tgt = os.readlink(sp)
+                    if not os.path.isabs(tgt):
+                        tgt = os.path.normpath(os.path.join(root, tgt))
+                    os.symlink(tgt, dp)
+                else:
+                    shutil.copy2(sp, dp)
+' 2>/dev/null || true
+        touch "$WINEPREFIX/.update-timestamp"
     fi
     "$WINE" wineboot --init
     "$WINE" reg add "HKCU\\Software\\Wine\\WineDbg" /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1 || true
@@ -1285,6 +1310,21 @@ fn windows_z_path(path: &Path) -> String {
 /// regedit syntax requires every backslash inside a value doubled.
 fn winrt_registry_file(classes: &[ActivatableClass], package_dir: &Path) -> String {
     let mut file = String::from("Windows Registry Editor Version 5.00\n\n");
+
+    // Standard system WinRT runtime classes required for UWP applications
+    const SYSTEM_CLASSES: &[(&str, &str)] = &[
+        ("Windows.ApplicationModel.Core.CoreApplication", "twinapi.appcore.dll"),
+        ("Windows.UI.Text.Core.CoreTextServicesManager", "windows.ui.xaml.dll"),
+        ("Windows.UI.Xaml.Application", "windows.ui.xaml.dll"),
+        ("Windows.UI.Xaml.Window", "windows.ui.xaml.dll"),
+    ];
+    for (class_id, dll) in SYSTEM_CLASSES {
+        file.push_str(&format!(
+            "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsRuntime\\ActivatableClassId\\{class_id}]\n\
+             \"DllPath\"=\"{dll}\"\n\n"
+        ));
+    }
+
     let directory = windows_z_path(package_dir);
     for class in classes {
         let dll = format!("{directory}\\{}", class.server_path.replace('/', "\\"));
@@ -1384,6 +1424,16 @@ mod tests {
             Path::new("/run/xodus"),
         );
         assert!(file.starts_with("Windows Registry Editor Version 5.00\n\n"));
+        assert!(file.contains(
+            "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsRuntime\\\
+             ActivatableClassId\\Windows.ApplicationModel.Core.CoreApplication]\n\
+             \"DllPath\"=\"twinapi.appcore.dll\"\n\n"
+        ));
+        assert!(file.contains(
+            "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsRuntime\\\
+             ActivatableClassId\\Windows.UI.Xaml.Application]\n\
+             \"DllPath\"=\"windows.ui.xaml.dll\"\n\n"
+        ));
         assert!(file.contains(
             "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsRuntime\\\
              ActivatableClassId\\Microsoft.UI.Xaml.Application]\n\
@@ -1568,7 +1618,8 @@ mod tests {
         assert!(script.contains("LC_ALL=\"${LC_ALL:-en_US.UTF-8}\""));
         assert!(script.contains("LANG=\"${LANG:-en_US.UTF-8}\""));
         assert!(script.contains("DEFAULT_PFX"));
-        assert!(script.contains("cp -rn \"$DEFAULT_PFX\"/* \"$WINEPREFIX/\""));
+        assert!(script.contains("Seeding Proton runtime template from $DEFAULT_PFX..."));
+        assert!(script.contains("dosdevices/c:"));
         assert!(script.contains("\"$WINESERVER\" -w"));
         assert!(script.contains("exec \"$WINE\" \"$APP_DIR/Game.exe\" \"$@\""));
     }
